@@ -187,6 +187,70 @@ class CommandTest extends \PHPUnit_Framework_TestCase
         $this->assertEmpty($this->requestLog->getExecutedCommands());
     }
 
+    /**
+     * Ensure command does not break when configured to log, though one hasn't been injected
+     *
+     * @dataProvider configBoolProvider
+     *
+     * @param bool $log_enabled  whether config is set to use request log
+     */
+    public function testRequestLogNotInjected($log_enabled) {
+
+        // Duplicate some of the class setup in order to bypass requestLog generation
+        $command = new CommandMock();
+        $command->setCommandMetricsFactory($this->commandMetricsFactory);
+        $command->setCircuitBreakerFactory($this->circuitBreakerFactory);
+        $command->setRequestCache(new RequestCache());
+
+        $command->setConfig(new \Zend\Config\Config(array(
+            'requestLog' => array(
+                'enabled' => $log_enabled,
+            ),
+        ), true));
+
+        $this->setUpCommonExpectations();
+
+        $this->assertEquals('run result', $this->command->execute());
+    }
+
+    /**
+     * Ensure command does not break when configured to cache, though cache hasn't been injected
+     *
+     * @dataProvider configBoolProvider
+     *
+     * @param bool $cache_enabled  whether config is set to use request log
+     */
+    public function testRequestCacheNotInjected($cache_enabled) {
+
+        // Duplicate some of the class setup in order to bypass requestLog generation
+        $command = new CommandMock();
+        $command->setCommandMetricsFactory($this->commandMetricsFactory);
+        $command->setCircuitBreakerFactory($this->circuitBreakerFactory);
+        $command->setRequestLog($this->requestLog);
+
+        $command->setConfig(new \Zend\Config\Config(array(
+            'requestCache' => array(
+                'enabled' => $cache_enabled,
+            ),
+        ), true));
+
+        $this->setUpCommonExpectations();
+
+        $this->assertEquals('run result', $this->command->execute());
+    }
+
+
+    /**
+     * @return array
+     */
+    public function configBoolProvider() {
+
+        return [
+            'config enabled'  => [ true ],
+            'config disabled' => [ false ],
+        ];
+    }
+
     public function testExecuteRequestNotAllowed()
     {
         $this->setUpCommonExpectations(false);
@@ -228,7 +292,7 @@ class CommandTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals(555, $this->command->getExecutionTimeInMilliseconds());
         $this->assertEquals(new \DomainException('could not run'), $this->command->getExecutionException());
     }
-    
+
     public function testExecuteFallbackFailed()
     {
         $this->setUpCommonExpectations();
