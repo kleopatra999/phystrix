@@ -217,24 +217,24 @@ abstract class AbstractCommand
     {
         $this->prepare();
         $metrics = $this->getMetrics();
-        $cache_enabled = $this->isRequestCacheEnabled();
+        $cacheEnabled = $this->isRequestCacheEnabled();
 
         // always adding the command to request log
         $this->recordExecutedCommand();
 
         // trying from cache first
-        if ($cache_enabled) {
+        if ($cacheEnabled) {
             $fromCache = $this->requestCache->get($this->getCommandKey(), $this->getCacheKey());
             if ($fromCache !== null) {
                 $metrics->markResponseFromCache();
-                $this->handleEvent(self::EVENT_RESPONSE_FROM_CACHE);
+                $this->recordExecutionEvent(self::EVENT_RESPONSE_FROM_CACHE);
                 return $fromCache;
             }
         }
         $circuitBreaker = $this->getCircuitBreaker();
         if (!$circuitBreaker->allowRequest()) {
             $metrics->markShortCircuited();
-            $this->handleEvent(self::EVENT_SHORT_CIRCUITED);
+            $this->recordExecutionEvent(self::EVENT_SHORT_CIRCUITED);
             return $this->getFallbackOrThrowException();
         }
         $this->invocationStartTime = $this->getTimeInMilliseconds();
@@ -243,7 +243,7 @@ abstract class AbstractCommand
             $this->recordExecutionTime();
             $metrics->markSuccess();
             $circuitBreaker->markSuccess();
-            $this->handleEvent(self::EVENT_SUCCESS);
+            $this->recordExecutionEvent(self::EVENT_SUCCESS);
         } catch (BadRequestException $exception) {
             // Treated differently and allowed to propagate without any stats tracking or fallback logic
             $this->recordExecutionTime();
@@ -251,12 +251,13 @@ abstract class AbstractCommand
         } catch (Exception $exception) {
             $this->recordExecutionTime();
             $metrics->markFailure();
-            $this->handleEvent(self::EVENT_FAILURE, $exception);
+            $this->executionException = $exception;
+            $this->recordExecutionEvent(self::EVENT_FAILURE);
             $result = $this->getFallbackOrThrowException($exception);
         }
 
         // putting the result into cache
-        if ($cache_enabled) {
+        if ($cacheEnabled) {
             $this->requestCache->put($this->getCommandKey(), $this->getCacheKey(), $result);
         }
 
@@ -278,6 +279,16 @@ abstract class AbstractCommand
     }
 
     /**
+     * Custom logic proceeding event generation
+     *
+     * @param string $eventName
+     */
+    protected function processExecutionEvent($eventName)
+    {
+    }
+
+
+    /**
      * Sets service locator instance, for injecting custom dependencies into the command
      *
      * @param LocatorInterface $serviceLocator
@@ -289,19 +300,15 @@ abstract class AbstractCommand
 
 
     /**
-     * Records list of actions that have taken place, with their exceptions
+     * Logic to record events and exceptions as they take place
      *
-     * @param string    $eventName  type from class constants EVENT_*
-     * @param Exception $e          exception that was thrown as part of $eventName
+     * @param string $eventName  type from class constants EVENT_*
      */
-    protected function handleEvent($eventName, \Exception $e = null )
+    private function recordExecutionEvent($eventName)
     {
         $this->executionEvents[] = $eventName;
 
-        if ($e) {
-            // TODO: since multiple events may take place, key this by event name
-            $this->executionException = $e;
-        }
+        $this->processExecutionEvent( $eventName );
     }
 
     /**
@@ -340,7 +347,7 @@ abstract class AbstractCommand
                 try {
                     $executionResult = $this->getFallback();
                     $metrics->markFallbackSuccess();
-                    $this->handleEvent(self::EVENT_FALLBACK_SUCCESS);
+                    $this->recordExecutionEvent(self::EVENT_FALLBACK_SUCCESS);
                     return $executionResult;
                 } catch (FallbackNotAvailableException $fallbackException) {
                     throw new RuntimeException(
@@ -350,7 +357,7 @@ abstract class AbstractCommand
                     );
                 } catch (Exception $fallbackException) {
                     $metrics->markFallbackFailure();
-                    $this->handleEvent(self::EVENT_FALLBACK_FAILURE);
+                    $this->recordExecutionEvent(self::EVENT_FALLBACK_FAILURE);
                     throw new RuntimeException(
                         $message . ' and failed retrieving fallback',
                         get_class($this),
@@ -368,7 +375,7 @@ abstract class AbstractCommand
         } catch (Exception $exception) {
             // count that we are throwing an exception and re-throw it
             $metrics->markExceptionThrown();
-            $this->handleEvent(self::EVENT_EXCEPTION_THROWN);
+            $this->recordExecutionEvent(self::EVENT_EXCEPTION_THROWN);
             throw $exception;
         }
     }
@@ -452,7 +459,7 @@ abstract class AbstractCommand
      */
     private function recordExecutedCommand()
     {
-        if ($this->requestLog && $this->config->get('requestLog')->get('enabled') ) {
+        if ($this->requestLog && $this->config->get('requestLog')->get('enabled')) {
             $this->requestLog->addExecutedCommand($this);
         }
     }
